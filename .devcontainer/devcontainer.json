@@ -1,0 +1,22 @@
+{
+    "name": "odin-demo",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "runArgs": [
+        "--device",
+        "/dev/kvm",
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "GitHub.vscode-pull-request-github",
+                "github.vscode-github-actions",
+                "mhutchie.git-graph",
+                "ms-vscode.live-server",
+                "tonybaloney.vscode-pets",
+                "DanielGavin.ols"
+            ]
+        }
+    }
+}

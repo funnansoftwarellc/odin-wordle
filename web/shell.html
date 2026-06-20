@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>odin-demo</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background-color: #1e1e1e;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+        }
+
+        canvas.game_canvas {
+            border: 0;
+            background-color: black;
+            display: block;
+            /* raylib/GLFW needs focus + no context menu to capture input */
+            outline: none;
+        }
+
+        #status {
+            margin: 8px;
+            font-size: 14px;
+            color: #888;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas class="game_canvas" id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"
+        onmousedown="event.target.focus()"></canvas>
+    <div id="status">Loading…</div>
+
+    <!-- Odin's js_wasm32 runtime. Provides the `odin_env` imports the wasm needs. -->
+    <script type="text/javascript" src="odin.js"></script>
+    <script>
+        const statusElement = document.getElementById("status");
+
+        // Set up Odin's runtime imports. They get merged into the imports that
+        // emscripten provides so the single wasm module satisfies both runtimes.
+        const odinMemoryInterface = new odin.WasmMemoryInterface();
+        odinMemoryInterface.setIntSize(4);
+        const odinImports = odin.setupDefaultImports(odinMemoryInterface);
+
+        var Module = {
+            canvas: document.getElementById("canvas"),
+            print: (text) => console.log(text),
+            printErr: (text) => console.error(text),
+            setStatus: (text) => { if (statusElement) statusElement.textContent = text; },
+
+            // Take over wasm instantiation so we can inject Odin's imports
+            // alongside the ones emscripten generates.
+            instantiateWasm: (imports, successCallback) => {
+                const merged = { ...odinImports };
+                for (const moduleName in imports) {
+                    merged[moduleName] = { ...(merged[moduleName] || {}), ...imports[moduleName] };
+                }
+                return WebAssembly.instantiateStreaming(fetch("index.wasm"), merged)
+                    .then((output) => {
+                        const e = output.instance.exports;
+                        odinMemoryInterface.setExports(e);
+                        odinMemoryInterface.setMemory(e.memory);
+                        return successCallback(output.instance, output.module);
+                    })
+                    .catch((err) => {
+                        console.error("instantiateWasm failed:", err);
+                        if (statusElement) statusElement.textContent = "Failed to load wasm: " + err;
+                    });
+            },
+
+            onRuntimeInitialized: () => {
+                if (statusElement) statusElement.style.display = "none";
+                // Run Odin's entry point. It calls InitWindow and then hands the
+                // frame loop to emscripten via emscripten_set_main_loop.
+                wasmExports._start();
+            },
+        };
+        Module.setStatus("Downloading…");
+        window.onerror = () => Module.setStatus("Exception thrown, see JavaScript console");
+    </script>
+
+    <!-- emscripten injects its generated loader here -->
+    {{{ SCRIPT }}}
+</body>
+
+</html>
