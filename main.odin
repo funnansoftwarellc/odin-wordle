@@ -5,6 +5,7 @@ package wordle
 import "core:fmt"
 import "core:reflect"
 import "core:strings"
+import "core:time"
 import k2 "karl2d"
 
 Letter :: enum {
@@ -53,7 +54,13 @@ Dictionary :: struct {
 	target: int,
 }
 
+Message :: struct {
+	text:     string,
+	duration: time.Duration,
+}
+
 GameBoard :: struct {
+	messages:      [dynamic]Message,
 	rows:          [6]Row,
 	letter_states: [Letter]LetterState,
 	color_states:  [LetterState]k2.Color,
@@ -61,6 +68,7 @@ GameBoard :: struct {
 	spacing:       f32,
 	active_row:    int,
 	builder:       strings.Builder,
+	elapsed_time:  time.Duration,
 }
 
 get_active_row :: proc(game_board: ^GameBoard) -> ^Row {
@@ -73,6 +81,13 @@ submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
 	active_row := get_active_row(game_board)
 	letters_to_string(active_row.letters, &game_board.builder)
 	guess := strings.to_string(game_board.builder)
+	msg_not_in_list :: "Not in word list"
+	msg_not_enough_letters :: "Not enough letters"
+
+	if len(guess) < 5 {
+		append(&game_board.messages, Message{msg_not_enough_letters, 0})
+		return
+	}
 
 	for word in dictionary.words {
 		if guess == word {
@@ -82,7 +97,7 @@ submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
 	}
 
 	if !valid_word {
-		fmt.println("Invalid word: ", guess)
+		append(&game_board.messages, Message{msg_not_in_list, 0})
 		return
 	}
 
@@ -107,16 +122,26 @@ main :: proc() {
 	game_board.color_states[.Present] = {181, 159, 59, 255}
 	game_board.color_states[.Correct] = {83, 141, 78, 255}
 
+	defer delete(game_board.messages)
+
+	strings.builder_init(&game_board.builder)
+	defer strings.builder_destroy(&game_board.builder)
+
 	dictionary := Dictionary{}
 	dictionary.target = 2
 	dictionary.words = [dynamic]string{"APPLE", "BANJO", "CRANE", "DELTA", "EAGLE", "FABLE"}
 	defer delete(dictionary.words)
 
-	strings.builder_init(&game_board.builder)
-	defer strings.builder_destroy(&game_board.builder)
-
 	init(&game_board)
-	for step(&game_board, &dictionary) {}
+
+	start_time := time.now()
+
+	for step(&game_board, &dictionary) {
+		current_time := time.now()
+		game_board.elapsed_time = time.diff(start_time, current_time)
+		start_time = current_time
+	}
+
 	shutdown()
 }
 
@@ -162,10 +187,14 @@ step :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) -> bool {
 		}
 	}
 
+	// Update Messages
+	update_messages(game_board)
+
 	// Render
 	k2.clear(k2.BLACK)
 
 	render_game_board(game_board)
+	render_messages(game_board)
 
 	k2.present()
 
@@ -176,6 +205,19 @@ shutdown :: proc() {
 	k2.shutdown()
 }
 
+update_messages :: proc(game_board: ^GameBoard) {
+	for &message in game_board.messages {
+		message.duration += game_board.elapsed_time
+	}
+
+	// Reverse to safely remove message while iterating.
+	#reverse for message, i in game_board.messages {
+		if message.duration >= 1 * time.Second {
+			ordered_remove(&game_board.messages, i)
+		}
+	}
+}
+
 render_game_board :: proc(game_board: ^GameBoard) {
 	board_width: f32 = game_board.size * 5 + game_board.spacing * 4
 	screen_size := k2.get_screen_size()
@@ -183,6 +225,7 @@ render_game_board :: proc(game_board: ^GameBoard) {
 	x: f32 = (screen_size.x - board_width) * 0.5
 	y: f32 = game_board.spacing
 
+	// Render grid
 	for row, _ in game_board.rows {
 		x = (screen_size.x - board_width) * 0.5
 		for letter, _ in row.letters {
@@ -225,6 +268,28 @@ render_game_board :: proc(game_board: ^GameBoard) {
 		}
 
 		y += game_board.size + game_board.spacing
+	}
+}
+
+render_messages :: proc(game_board: ^GameBoard) {
+	screen_size := k2.get_screen_size()
+
+	rect_y := game_board.spacing * 2
+
+	for message, _ in game_board.messages {
+		text_size := k2.measure_text(message.text, 24)
+		text_spacing :: 10
+		rect_width := text_size.x + (text_spacing * 2)
+		rect_height := text_size.y + (text_spacing * 2)
+		rect_x := (screen_size.x - rect_width) * 0.5
+
+		k2.draw_rect({rect_x, rect_y, rect_width, rect_height}, k2.WHITE)
+
+		text_centered_x := rect_x + (rect_width - text_size.x) * 0.5
+		text_centered_y := rect_y + (rect_height - text_size.y) * 0.5
+		k2.draw_text(message.text, {text_centered_x, text_centered_y}, 24, k2.BLACK)
+
+		rect_y += rect_height + game_board.spacing * 2
 	}
 }
 
