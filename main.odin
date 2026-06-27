@@ -129,9 +129,12 @@ submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
 
 	for &g, i in active_row.letters {
 		for t, k in target {
-			if g.letter == t && i != k && target_letter_count[g.letter] > 0 {
+			if g.letter == t &&
+			   g.state != LetterState.Correct &&
+			   target_letter_count[g.letter] > 0 {
 				g.state = LetterState.Present
 				target_letter_count[g.letter] -= 1
+				break
 			}
 		}
 	}
@@ -168,8 +171,19 @@ main :: proc() {
 	defer strings.builder_destroy(&game_board.builder)
 
 	dictionary := Dictionary{}
-	dictionary.target = 2
-	dictionary.words = [dynamic]string{"APPLE", "BANJO", "CRANE", "DELTA", "EAGLE", "FABLE"}
+	dictionary.target = 4
+	dictionary.words = [dynamic]string {
+		"APPLE",
+		"BANJO",
+		"CRANE",
+		"DELTA",
+		"EAGLE",
+		"FABLE",
+		"MEETS",
+		"PEEVE",
+		"QUILT",
+	}
+
 	defer delete(dictionary.words)
 
 	init(&game_board)
