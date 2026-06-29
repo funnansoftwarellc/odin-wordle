@@ -3,6 +3,7 @@
 package wordle
 
 import "core:fmt"
+import "core:math/rand"
 import "core:reflect"
 import "core:strings"
 import "core:time"
@@ -47,6 +48,12 @@ LetterState :: enum {
 	Correct,
 }
 
+GameState :: enum {
+	Playing,
+	Won,
+	Lost,
+}
+
 Guess :: struct {
 	letter: Letter,
 	state:  LetterState,
@@ -54,11 +61,6 @@ Guess :: struct {
 
 Row :: struct {
 	letters: [5]Guess,
-}
-
-Dictionary :: struct {
-	words:  [dynamic]string,
-	target: int,
 }
 
 Message :: struct {
@@ -77,13 +79,39 @@ GameBoard :: struct {
 	active_row:     int,
 	builder:        strings.Builder,
 	elapsed_time:   time.Duration,
+	state:          GameState,
+	words:          [dynamic]string,
+	target_word:    string,
+}
+
+main :: proc() {
+	game_board := new_game()
+
+	defer delete(game_board.keyboard)
+	defer delete(game_board.messages)
+
+	strings.builder_init(&game_board.builder)
+	defer strings.builder_destroy(&game_board.builder)
+	defer delete(game_board.words)
+
+	init(&game_board)
+
+	start_time := time.now()
+
+	for step(&game_board) {
+		current_time := time.now()
+		game_board.elapsed_time = time.diff(start_time, current_time)
+		start_time = current_time
+	}
+
+	shutdown()
 }
 
 get_active_row :: proc(game_board: ^GameBoard) -> ^Row {
 	return &game_board.rows[game_board.active_row]
 }
 
-submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
+submit_active_row :: proc(game_board: ^GameBoard) {
 
 	valid_word := false
 	active_row := get_active_row(game_board)
@@ -97,7 +125,7 @@ submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
 		return
 	}
 
-	for word in dictionary.words {
+	for word in game_board.words {
 		if guess == word {
 			valid_word = true
 			break
@@ -109,7 +137,7 @@ submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
 		return
 	}
 
-	target := string_to_letters(dictionary.words[dictionary.target])
+	target := string_to_letters(game_board.target_word)
 
 	target_letter_count := make(map[Letter]int)
 	defer delete(target_letter_count)
@@ -154,13 +182,62 @@ submit_active_row :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) {
 		}
 	}
 
+	if success {
+		game_board.state = GameState.Won
+		append(&game_board.messages, Message{"You won!", 0})
+	} else if game_board.active_row == len(game_board.rows) - 1 {
+		game_board.state = GameState.Lost
+		append(&game_board.messages, Message{"You lost!", 0})
+	}
+
 	if game_board.active_row < len(game_board.rows) - 1 {
 		game_board.active_row += 1
 	}
 }
 
-main :: proc() {
+
+init :: proc(game_board: ^GameBoard) {
+	k2.init(1280, 720, "Wordle", {.Windowed_Resizable, false, false})
+	k2.set_window_position(1280, 360)
+}
+
+step :: proc(game_board: ^GameBoard) -> bool {
+	if !k2.update() {
+		return false
+	}
+
+	// Inputs
+	active_row := get_active_row(game_board)
+
+	for event, i in k2.get_events() {
+		#partial switch e in event {
+		case k2.Event_Key_Went_Down:
+			current_letter := keys_to_letters(e.key)
+			process_key(game_board, current_letter)
+		}
+	}
+
+	// Update Messages
+	update_messages(game_board)
+
+	// Render
+	k2.clear(k2.BLACK)
+
+	render_game_board(game_board)
+	render_messages(game_board)
+
+	k2.present()
+
+	return true
+}
+
+shutdown :: proc() {
+	k2.shutdown()
+}
+
+new_game :: proc() -> GameBoard {
 	game_board := GameBoard{}
+	game_board.state = GameState.Playing
 	game_board.size = 70
 	game_board.spacing = 5
 	game_board.color_states[.Default] = {130, 131, 135, 255}
@@ -214,15 +291,7 @@ main :: proc() {
 		},
 	)
 
-	defer delete(game_board.keyboard)
-	defer delete(game_board.messages)
-
-	strings.builder_init(&game_board.builder)
-	defer strings.builder_destroy(&game_board.builder)
-
-	dictionary := Dictionary{}
-	dictionary.target = 4
-	dictionary.words = [dynamic]string {
+	game_board.words = [dynamic]string {
 		"APPLE",
 		"BANJO",
 		"CRANE",
@@ -234,79 +303,35 @@ main :: proc() {
 		"QUILT",
 	}
 
-	defer delete(dictionary.words)
+	game_board.target_word = game_board.words[rand.int_range(0, len(game_board.words) - 1)]
 
-	init(&game_board)
-
-	start_time := time.now()
-
-	for step(&game_board, &dictionary) {
-		current_time := time.now()
-		game_board.elapsed_time = time.diff(start_time, current_time)
-		start_time = current_time
-	}
-
-	shutdown()
+	return game_board
 }
 
-init :: proc(game_board: ^GameBoard) {
-	k2.init(1280, 720, "Wordle", {.Windowed_Resizable, false, false})
-	k2.set_window_position(1280, 360)
-}
-
-step :: proc(game_board: ^GameBoard, dictionary: ^Dictionary) -> bool {
-	if !k2.update() {
-		return false
-	}
-
-	// Inputs
+process_key :: proc(game_board: ^GameBoard, letter: Letter) {
 	active_row := get_active_row(game_board)
 
-	for event, i in k2.get_events() {
-		#partial switch e in event {
-		case k2.Event_Key_Went_Down:
-			current_letter := keys_to_letters(e.key)
+	// Fill active row.
+	if letter != .None && letter != .Enter && letter != .Delete {
+		for &guess in active_row.letters {
+			if guess.letter != Letter.None {
+				continue
+			}
 
-			// Fill active row.
-			if current_letter != .None {
-				for &guess in active_row.letters {
-					if guess.letter != Letter.None {
-						continue
-					}
-
-					guess.letter = current_letter
-					break
-				}
-			} else if e.key == k2.Keyboard_Key.Backspace {
-				// Remove last letter from active row.
-				#reverse for &guess in active_row.letters {
-					if guess.letter != Letter.None {
-						guess.letter = Letter.None
-						break
-					}
-				}
-			} else if e.key == k2.Keyboard_Key.Enter {
-				submit_active_row(game_board, dictionary)
+			guess.letter = letter
+			break
+		}
+	} else if letter == .Delete {
+		// Remove last letter from active row.
+		#reverse for &guess in active_row.letters {
+			if guess.letter != Letter.None {
+				guess.letter = Letter.None
+				break
 			}
 		}
+	} else if letter == .Enter {
+		submit_active_row(game_board)
 	}
-
-	// Update Messages
-	update_messages(game_board)
-
-	// Render
-	k2.clear(k2.BLACK)
-
-	render_game_board(game_board)
-	render_messages(game_board)
-
-	k2.present()
-
-	return true
-}
-
-shutdown :: proc() {
-	k2.shutdown()
 }
 
 update_messages :: proc(game_board: ^GameBoard) {
@@ -373,32 +398,64 @@ render_game_board :: proc(game_board: ^GameBoard) {
 	}
 
 
-	key_width: f32 = game_board.size * 0.65
+	if game_board.state == GameState.Playing {
 
-	y = screen_size.y - (game_board.size + game_board.spacing) * 3
+		key_width: f32 = game_board.size * 0.65
 
-	for row in game_board.keyboard {
-		len := len(row)
-		spaces := len - 1
-		x = (screen_size.x - (key_width * f32(len) + game_board.spacing * f32(spaces))) * 0.5
+		y = screen_size.y - (game_board.size + game_board.spacing) * 3
 
-		for key in row {
-			k2.draw_rect(
-				{x, y, key_width, game_board.size},
-				game_board.color_states[game_board.keyboard_state[key]],
-			)
+		for row in game_board.keyboard {
+			len := len(row)
+			spaces := len - 1
+			x = (screen_size.x - (key_width * f32(len) + game_board.spacing * f32(spaces))) * 0.5
 
-			text := reflect.enum_string(key)
-			text_size := k2.measure_text(text, game_board.size * 0.5)
-			text_centered_x := x + (key_width - text_size.x) * 0.5
-			text_centered_y := y + (game_board.size - text_size.y) * 0.5
+			for key in row {
+				// Intersect the key position and size.
+				if k2.mouse_button_went_down(k2.Mouse_Button.Left) &&
+				   k2.point_in_rect(k2.get_mouse_position(), {x, y, key_width, game_board.size}) {
 
-			k2.draw_text(text, {text_centered_x, text_centered_y}, game_board.size * 0.5, k2.WHITE)
+					process_key(game_board, key)
+				}
 
-			x += key_width + game_board.spacing
+				k2.draw_rect(
+					{x, y, key_width, game_board.size},
+					game_board.color_states[game_board.keyboard_state[key]],
+				)
+
+				text := reflect.enum_string(key)
+				text_size := k2.measure_text(text, game_board.size * 0.5)
+				text_centered_x := x + (key_width - text_size.x) * 0.5
+				text_centered_y := y + (game_board.size - text_size.y) * 0.5
+
+				k2.draw_text(
+					text,
+					{text_centered_x, text_centered_y},
+					game_board.size * 0.5,
+					k2.WHITE,
+				)
+
+				x += key_width + game_board.spacing
+			}
+
+			y += game_board.size + game_board.spacing
+		}
+	} else {
+		rect := k2.Rect{(screen_size.x - 150) * 0.5, y, 150, 50}
+
+
+		if k2.mouse_button_went_down(k2.Mouse_Button.Left) &&
+		   k2.point_in_rect(k2.get_mouse_position(), rect) {
+
+			game_board^ = new_game()
 		}
 
-		y += game_board.size + game_board.spacing
+		k2.draw_rect_outline(rect, 4, k2.WHITE)
+
+		text_size := k2.measure_text("New Game", 24)
+		text_centered_x := rect.x + (rect.w - text_size.x) * 0.5
+		text_centered_y := rect.y + (rect.h - text_size.y) * 0.5
+
+		k2.draw_text("New Game", {text_centered_x, text_centered_y}, 24, k2.WHITE)
 	}
 }
 
@@ -478,6 +535,10 @@ keys_to_letters :: proc(key: k2.Keyboard_Key) -> Letter {
 		return Letter.Y
 	case .Z:
 		return Letter.Z
+	case .Enter:
+		return Letter.Enter
+	case .Backspace:
+		return Letter.Delete
 	}
 
 	return .None
