@@ -105,15 +105,7 @@ main :: proc() {
 	game_board := new_game()
 	strings.builder_init(&game_board.builder)
 
-	defer {
-		for keys in game_board.keyboard {
-			delete(keys)
-		}
-		delete(game_board.keyboard)
-		delete(game_board.messages)
-		strings.builder_destroy(&game_board.builder)
-		delete(game_board.words)
-	}
+	defer destroy_game_board(&game_board)
 
 	init(&game_board)
 
@@ -191,8 +183,11 @@ submit_active_row :: proc(game_board: ^GameBoard) {
 		}
 	}
 
+	// Update keyboard state with best state.
 	for letter in active_row.letters {
-		game_board.keyboard_state[letter.letter] = letter.state
+		if letter.state > game_board.keyboard_state[letter.letter] {
+			game_board.keyboard_state[letter.letter] = letter.state
+		}
 	}
 
 	success := true
@@ -329,7 +324,23 @@ new_game :: proc() -> GameBoard {
 	return game_board
 }
 
+// Free the game board's resources.
+destroy_game_board :: proc(game_board: ^GameBoard) {
+	for keys in game_board.keyboard {
+		delete(keys)
+	}
+	delete(game_board.keyboard)
+	delete(game_board.messages)
+	strings.builder_destroy(&game_board.builder)
+	delete(game_board.words)
+}
+
 process_key :: proc(game_board: ^GameBoard, letter: Letter) {
+	// Prevent inputs once the game is over.
+	if game_board.state != .Playing {
+		return
+	}
+
 	active_row := get_active_row(game_board)
 
 	// Fill active row.
@@ -467,7 +478,9 @@ render_game_board :: proc(game_board: ^GameBoard) {
 		if k2.mouse_button_went_down(k2.Mouse_Button.Left) &&
 		   k2.point_in_rect(k2.get_mouse_position(), rect) {
 
+			destroy_game_board(game_board)
 			game_board^ = new_game()
+			strings.builder_init(&game_board.builder)
 		}
 
 		k2.draw_rect_outline(rect, 4, k2.WHITE)
