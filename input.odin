@@ -45,12 +45,12 @@ handle_mouse_input :: proc(game_board: ^GameBoard) {
 	screen_size := k2.get_screen_size()
 
 	if game_board.state == .Playing {
-		key_width := keyboard_key_width(game_board)
 		y := keyboard_top_y(game_board, screen_size)
 
 		for row in keyboard_layout {
-			x := keyboard_row_start_x(game_board, screen_size, len(row))
+			x := keyboard_row_start_x(game_board, screen_size, row)
 			for key in row {
+				key_width := keyboard_key_width_for(game_board, key)
 				if k2.point_in_rect(mouse, {x, y, key_width, game_board.size}) {
 					process_key(game_board, key)
 					return

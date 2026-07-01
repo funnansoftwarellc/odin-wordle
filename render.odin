@@ -7,6 +7,9 @@ import k2 "karl2d"
 // input (see input.odin for that).
 
 KEY_WIDTH_RATIO :: 0.65
+// Enter and Delete render a whole word rather than a single glyph, so they get a
+// wider key. 1.5x a letter key also keeps the three rows about equal width.
+WIDE_KEY_SCALE  :: 1.5
 UI_FONT_SIZE    :: 24
 BUTTON_WIDTH    :: 150
 BUTTON_HEIGHT   :: 50
@@ -39,15 +42,32 @@ keyboard_key_width :: proc(game_board: ^GameBoard) -> f32 {
 	return game_board.size * KEY_WIDTH_RATIO
 }
 
+// The width of one key. Enter and Delete are wider than the letter keys so their
+// labels fit; every other key uses the base letter-key width.
+keyboard_key_width_for :: proc(game_board: ^GameBoard, key: Letter) -> f32 {
+	width := keyboard_key_width(game_board)
+	if key == .Enter || key == .Delete {
+		width *= WIDE_KEY_SCALE
+	}
+	return width
+}
+
+// Total laid-out width of a row: every key's width plus the gaps between them.
+keyboard_row_width :: proc(game_board: ^GameBoard, row: []Letter) -> f32 {
+	width := game_board.spacing * f32(len(row) - 1)
+	for key in row {
+		width += keyboard_key_width_for(game_board, key)
+	}
+	return width
+}
+
 keyboard_top_y :: proc(game_board: ^GameBoard, screen_size: k2.Vec2) -> f32 {
 	// Three rows tall, anchored to the bottom of the screen.
 	return screen_size.y - (game_board.size + game_board.spacing) * 3
 }
 
-keyboard_row_start_x :: proc(game_board: ^GameBoard, screen_size: k2.Vec2, key_count: int) -> f32 {
-	key_width := keyboard_key_width(game_board)
-	row_width := key_width * f32(key_count) + game_board.spacing * f32(key_count - 1)
-	return (screen_size.x - row_width) * 0.5
+keyboard_row_start_x :: proc(game_board: ^GameBoard, screen_size: k2.Vec2, row: []Letter) -> f32 {
+	return (screen_size.x - keyboard_row_width(game_board, row)) * 0.5
 }
 
 new_game_button_rect :: proc(game_board: ^GameBoard, screen_size: k2.Vec2) -> k2.Rect {
@@ -66,6 +86,20 @@ draw_text_centered :: proc(text: string, rect: k2.Rect, font_size: f32, color: k
 		rect.y + (rect.h - text_size.y) * 0.5,
 	}
 	k2.draw_text(text, pos, font_size, color)
+}
+
+// Like draw_text_centered, but shrinks the font if the text would overflow the
+// rect's width (minus a little horizontal padding). Single glyphs render at the
+// requested size; multi-character labels like "Enter"/"Delete" scale down to fit.
+draw_text_fit :: proc(text: string, rect: k2.Rect, font_size: f32, color: k2.Color) {
+	TEXT_PADDING :: 8
+	size := font_size
+	max_width := rect.w - TEXT_PADDING * 2
+	text_width := k2.measure_text(text, size).x
+	if text_width > max_width && text_width > 0 {
+		size *= max_width / text_width
+	}
+	draw_text_centered(text, rect, size, color)
 }
 
 render_game_board :: proc(game_board: ^GameBoard) {
@@ -102,15 +136,15 @@ render_game_board :: proc(game_board: ^GameBoard) {
 }
 
 render_keyboard :: proc(game_board: ^GameBoard, screen_size: k2.Vec2) {
-	key_width := keyboard_key_width(game_board)
 	y := keyboard_top_y(game_board, screen_size)
 
 	for row in keyboard_layout {
-		x := keyboard_row_start_x(game_board, screen_size, len(row))
+		x := keyboard_row_start_x(game_board, screen_size, row)
 		for key in row {
+			key_width := keyboard_key_width_for(game_board, key)
 			rect := k2.Rect{x, y, key_width, game_board.size}
 			k2.draw_rect(rect, LETTER_COLORS[game_board.keyboard_state[key]])
-			draw_text_centered(LETTER_TEXT[key], rect, game_board.size * 0.5, k2.WHITE)
+			draw_text_fit(LETTER_TEXT[key], rect, game_board.size * 0.5, k2.WHITE)
 			x += key_width + game_board.spacing
 		}
 		y += game_board.size + game_board.spacing
