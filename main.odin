@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:math/rand"
 import "core:mem"
 import "core:reflect"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import k2 "karl2d"
@@ -126,7 +127,6 @@ get_active_row :: proc(game_board: ^GameBoard) -> ^Row {
 
 submit_active_row :: proc(game_board: ^GameBoard) {
 
-	valid_word := false
 	active_row := get_active_row(game_board)
 	letters_to_string(active_row.letters, &game_board.builder)
 	guess := strings.to_string(game_board.builder)
@@ -138,14 +138,7 @@ submit_active_row :: proc(game_board: ^GameBoard) {
 		return
 	}
 
-	for word in game_board.words {
-		if guess == word {
-			valid_word = true
-			break
-		}
-	}
-
-	if !valid_word {
+	if !slice.contains(game_board.words[:], guess) {
 		append(&game_board.messages, Message{msg_not_in_list, 0})
 		return
 	}
@@ -159,27 +152,20 @@ submit_active_row :: proc(game_board: ^GameBoard) {
 		target_letter_count[letter] += 1
 	}
 
+	// First pass: exact position matches.
 	for &g, i in active_row.letters {
 		g.state = LetterState.Absent
-		for t, k in target {
-			if g.letter == t {
-				if i == k {
-					g.state = LetterState.Correct
-					target_letter_count[g.letter] -= 1
-				}
-			}
+		if g.letter == target[i] {
+			g.state = LetterState.Correct
+			target_letter_count[g.letter] -= 1
 		}
 	}
 
-	for &g, i in active_row.letters {
-		for t, k in target {
-			if g.letter == t &&
-			   g.state != LetterState.Correct &&
-			   target_letter_count[g.letter] > 0 {
-				g.state = LetterState.Present
-				target_letter_count[g.letter] -= 1
-				break
-			}
+	// Second pass: right letter, wrong position, if the target still has one left.
+	for &g in active_row.letters {
+		if g.state != LetterState.Correct && target_letter_count[g.letter] > 0 {
+			g.state = LetterState.Present
+			target_letter_count[g.letter] -= 1
 		}
 	}
 
@@ -390,24 +376,13 @@ render_game_board :: proc(game_board: ^GameBoard) {
 	for row, _ in game_board.rows {
 		x = (screen_size.x - board_width) * 0.5
 		for guess, _ in row.letters {
-			switch guess.state {
-			case LetterState.Default:
+			if guess.state == LetterState.Default {
 				k2.draw_rect_outline(
 					{x, y, game_board.size, game_board.size},
 					2,
 					game_board.color_states[.Absent],
 				)
-			case LetterState.Absent:
-				k2.draw_rect(
-					{x, y, game_board.size, game_board.size},
-					game_board.color_states[guess.state],
-				)
-			case LetterState.Present:
-				k2.draw_rect(
-					{x, y, game_board.size, game_board.size},
-					game_board.color_states[guess.state],
-				)
-			case LetterState.Correct:
+			} else {
 				k2.draw_rect(
 					{x, y, game_board.size, game_board.size},
 					game_board.color_states[guess.state],
@@ -516,59 +491,13 @@ render_messages :: proc(game_board: ^GameBoard) {
 }
 
 keys_to_letters :: proc(key: k2.Keyboard_Key) -> Letter {
+	// karl2d's Keyboard_Key.A..Z are the ASCII codes for 'A'..'Z', so the
+	// same offset trick as rune_to_letter applies here.
+	if key >= .A && key <= .Z {
+		return Letter(int(Letter.A) + int(key) - int(k2.Keyboard_Key.A))
+	}
+
 	#partial switch key {
-	case .A:
-		return Letter.A
-	case .B:
-		return Letter.B
-	case .C:
-		return Letter.C
-	case .D:
-		return Letter.D
-	case .E:
-		return Letter.E
-	case .F:
-		return Letter.F
-	case .G:
-		return Letter.G
-	case .H:
-		return Letter.H
-	case .I:
-		return Letter.I
-	case .J:
-		return Letter.J
-	case .K:
-		return Letter.K
-	case .L:
-		return Letter.L
-	case .M:
-		return Letter.M
-	case .N:
-		return Letter.N
-	case .O:
-		return Letter.O
-	case .P:
-		return Letter.P
-	case .Q:
-		return Letter.Q
-	case .R:
-		return Letter.R
-	case .S:
-		return Letter.S
-	case .T:
-		return Letter.T
-	case .U:
-		return Letter.U
-	case .V:
-		return Letter.V
-	case .W:
-		return Letter.W
-	case .X:
-		return Letter.X
-	case .Y:
-		return Letter.Y
-	case .Z:
-		return Letter.Z
 	case .Enter:
 		return Letter.Enter
 	case .Backspace:
@@ -590,60 +519,11 @@ letters_to_string :: proc(guess: [5]Guess, builder: ^strings.Builder) {
 	}
 }
 
-rune_to_letter :: proc(s: rune) -> Letter {
-	switch s {
-	case 'A':
-		return Letter.A
-	case 'B':
-		return Letter.B
-	case 'C':
-		return Letter.C
-	case 'D':
-		return Letter.D
-	case 'E':
-		return Letter.E
-	case 'F':
-		return Letter.F
-	case 'G':
-		return Letter.G
-	case 'H':
-		return Letter.H
-	case 'I':
-		return Letter.I
-	case 'J':
-		return Letter.J
-	case 'K':
-		return Letter.K
-	case 'L':
-		return Letter.L
-	case 'M':
-		return Letter.M
-	case 'N':
-		return Letter.N
-	case 'O':
-		return Letter.O
-	case 'P':
-		return Letter.P
-	case 'Q':
-		return Letter.Q
-	case 'R':
-		return Letter.R
-	case 'S':
-		return Letter.S
-	case 'T':
-		return Letter.T
-	case 'U':
-		return Letter.U
-	case 'V':
-		return Letter.V
-	case 'W':
-		return Letter.W
-	case 'X':
-		return Letter.X
-	case 'Y':
-		return Letter.Y
-	case 'Z':
-		return Letter.Z
+rune_to_letter :: proc(r: rune) -> Letter {
+	// Letter's A..Z members are declared in alphabetical order right after
+	// None, so a rune's offset from 'A' is also its offset from Letter.A.
+	if r >= 'A' && r <= 'Z' {
+		return Letter(int(Letter.A) + int(r - 'A'))
 	}
 
 	return Letter.None
