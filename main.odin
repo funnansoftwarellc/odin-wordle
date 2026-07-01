@@ -73,6 +73,8 @@ Message :: struct {
 GameBoard :: struct {
 	messages:       [dynamic]Message,
 	rows:           [6]Row,
+	// Indexed by the full Letter enum for convenience, but None/Enter/Delete
+	// never get a meaningful state -- only A..Z are ever looked up.
 	keyboard_state: [Letter]LetterState,
 	keyboard:       [dynamic][dynamic]Letter,
 	color_states:   [LetterState]k2.Color,
@@ -447,7 +449,11 @@ render_game_board :: proc(game_board: ^GameBoard) {
 			y += game_board.size + game_board.spacing
 		}
 	} else {
-		rect := k2.Rect{(screen_size.x - 150) * 0.5, y, 150, 50}
+		// Position explicitly just below the grid, instead of relying on
+		// whatever the row-rendering loop above happened to leave `y` at.
+		board_height :=
+			game_board.spacing + f32(len(game_board.rows)) * (game_board.size + game_board.spacing)
+		rect := k2.Rect{(screen_size.x - 150) * 0.5, board_height, 150, 50}
 
 
 		if k2.mouse_button_went_down(k2.Mouse_Button.Left) &&
