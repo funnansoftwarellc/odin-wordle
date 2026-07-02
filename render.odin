@@ -128,7 +128,7 @@ render_game_board :: proc(game_board: ^GameBoard) {
 		y += game_board.size + game_board.spacing
 	}
 
-	if game_board.state == .Playing {
+	if game_board.mode == .Playing {
 		render_keyboard(game_board, screen_size)
 	} else {
 		render_new_game_button(game_board, screen_size)

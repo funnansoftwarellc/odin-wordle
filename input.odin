@@ -44,7 +44,7 @@ handle_mouse_input :: proc(game_board: ^GameBoard) {
 	mouse := k2.get_mouse_position()
 	screen_size := k2.get_screen_size()
 
-	if game_board.state == .Playing {
+	if game_board.mode == .Playing {
 		y := keyboard_top_y(game_board, screen_size)
 
 		for row in keyboard_layout {
