@@ -3,15 +3,13 @@ package wordle
 import "core:fmt"
 import "core:mem"
 import "core:time"
+import "core:strings"
 import k2 "karl2d"
 
 WINDOW_WIDTH :: 1280
 WINDOW_HEIGHT :: 720
 
 game_board: GameBoard
-
-// The timestamp of the previous frame, used to feed game_board.elapsed_time.
-prev_time: time.Time
 
 // core:mem is only referenced by the debug tracking allocator in main().
 _ :: mem
@@ -32,10 +30,8 @@ main :: proc() {
 			mem.tracking_allocator_destroy(&track)
 		}
 	}
-
 	init()
 	defer shutdown()
-
 	for step() {}
 }
 
@@ -44,15 +40,16 @@ init :: proc() {
 	// Offset onto a secondary monitor to the right of a WINDOW_WIDTH-wide primary.
 	k2.set_window_position(WINDOW_WIDTH, 360)
 
+	game_board.builder = strings.builder_from_bytes(game_board.builder_buff[:]) // init a string builder whith a static array
+
 	if !load_word_list() {
 		// The list is embedded at build time and verified to parse, so this should
 		// never happen at runtime; log rather than crash, leaving game_board zeroed.
 		fmt.eprintln("Failed to load word list from embedded words.json")
 		return
 	}
-
-	game_board = new_game()
-	prev_time = time.now()
+	reset_game(&game_board)
+	game_board.prev_time = time.now()
 }
 
 step :: proc() -> bool {
@@ -61,8 +58,8 @@ step :: proc() -> bool {
 	}
 
 	now := time.now()
-	game_board.elapsed_time = time.diff(prev_time, now)
-	prev_time = now
+	game_board.elapsed_time = time.diff(game_board.prev_time, now)
+	game_board.prev_time = now
 
 	handle_input(&game_board)
 	update_messages(&game_board)
@@ -76,7 +73,6 @@ step :: proc() -> bool {
 }
 
 shutdown :: proc() {
-	destroy_game_board(&game_board)
 	destroy_word_list()
 	k2.shutdown()
 }

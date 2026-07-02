@@ -12,6 +12,7 @@ import "core:time"
 
 WORD_LENGTH      :: 5
 MAX_GUESSES      :: 6
+MAX_MESSAGES     :: 25
 MESSAGE_LIFETIME :: 1 * time.Second
 
 Letter :: enum {
@@ -53,7 +54,7 @@ LetterState :: enum {
 	Correct,
 }
 
-GameState :: enum {
+GameMode :: enum {
 	Playing,
 	Won,
 	Lost,
@@ -76,18 +77,30 @@ Message :: struct {
 }
 
 GameBoard :: struct {
-	messages:       [dynamic]Message,
-	rows:           [MAX_GUESSES]Row,
-	// Indexed by the full Letter enum for convenience, but None/Enter/Delete
-	// never get a meaningful state -- only A..Z are ever written.
-	keyboard_state: [Letter]LetterState,
-	size:           f32,
-	spacing:        f32,
-	active_row:     int,
+	messages:       [dynamic;MAX_MESSAGES]Message,// you should never have more than 25
 	builder:        strings.Builder,
-	elapsed_time:   time.Duration,
-	state:          GameState,
-	target_word:    string,
+	builder_buff:   [WORD_LENGTH*5]byte, //the builder now has a statick array so no need to free it you should never need more than WORD_LENGTH*5. WORD_LENGTH is problobly good but i *5 just to be safe
+	
+	// The timestamp of the previous frame, used to feed game_board.elapsed_time.
+	prev_time: time.Time,
+
+	// The parsed dictionary of valid guesses; the target is drawn from it. Populated
+	// once by load_word_list at startup and owned until destroy_word_list. json
+	// clones each word onto the heap, so both the slice and its strings are owned.
+	word_list: []string,
+
+	using state: struct{ // all of this data gets set to zero on game restart/start
+		rows:           [MAX_GUESSES]Row,
+		// Indexed by the full Letter enum for convenience, but None/Enter/Delete
+		// never get a meaningful state -- only A..Z are ever written.
+		keyboard_state: [Letter]LetterState,
+		size:           f32,
+		spacing:        f32,
+		active_row:     int,
+		elapsed_time:   time.Duration,
+		mode:           GameMode,
+		target_word:    string,
+	},
 }
 
 // The dictionary's JSON is embedded into the binary at build time via #load, so
@@ -96,15 +109,10 @@ GameBoard :: struct {
 @(rodata)
 WORD_LIST_JSON := #load("words.json")
 
-// The parsed dictionary of valid guesses; the target is drawn from it. Populated
-// once by load_word_list at startup and owned until destroy_word_list. json
-// clones each word onto the heap, so both the slice and its strings are owned.
-word_list: []string
-
 // Parse the embedded JSON into word_list. Call once at startup, before new_game;
 // returns false (and leaves nothing allocated) if the embedded JSON is invalid.
 load_word_list :: proc() -> bool {
-	if err := json.unmarshal(WORD_LIST_JSON, &word_list); err != nil {
+	if err := json.unmarshal(WORD_LIST_JSON, &game_board.word_list); err != nil {
 		destroy_word_list()
 		return false
 	}
@@ -115,33 +123,20 @@ load_word_list :: proc() -> bool {
 // Free the heap-allocated word list. Call once at shutdown, after the last game
 // board that borrows target_word from it has been destroyed.
 destroy_word_list :: proc() {
-	for word in word_list {
+	for word in game_board.word_list {
 		delete(word)
 	}
-	delete(word_list)
-	word_list = nil
+	delete(game_board.word_list)
+	game_board.word_list = nil
 }
 
-new_game :: proc() -> GameBoard {
-	game_board := GameBoard{}
-	game_board.state = .Playing
+// 0 out gmae board and set the data to some defalts
+reset_game :: proc(game_board: ^GameBoard) {
+	game_board.state = {}
+	game_board.mode = .Playing
 	game_board.size = 70
 	game_board.spacing = 5
-	strings.builder_init(&game_board.builder)
-	game_board.target_word = word_list[rand.int_range(0, len(word_list))]
-	return game_board
-}
-
-// Free the game board's owned resources.
-destroy_game_board :: proc(game_board: ^GameBoard) {
-	delete(game_board.messages)
-	strings.builder_destroy(&game_board.builder)
-}
-
-// Tear down the current board and start a fresh one in place.
-reset_game :: proc(game_board: ^GameBoard) {
-	destroy_game_board(game_board)
-	game_board^ = new_game()
+	game_board.target_word = game_board.word_list[rand.int_range(0, len(game_board.word_list))]
 }
 
 get_active_row :: proc(game_board: ^GameBoard) -> ^Row {
@@ -150,7 +145,7 @@ get_active_row :: proc(game_board: ^GameBoard) -> ^Row {
 
 process_key :: proc(game_board: ^GameBoard, letter: Letter) {
 	// Prevent inputs once the game is over.
-	if game_board.state != .Playing {
+	if game_board.mode != .Playing {
 		return
 	}
 
@@ -192,7 +187,7 @@ submit_active_row :: proc(game_board: ^GameBoard) {
 		return
 	}
 
-	if !slice.contains(word_list, guess) {
+	if !slice.contains(game_board.word_list, guess) {
 		append(&game_board.messages, Message{msg_not_in_list, 0})
 		return
 	}
@@ -238,10 +233,10 @@ submit_active_row :: proc(game_board: ^GameBoard) {
 	}
 
 	if success {
-		game_board.state = .Won
+		game_board.mode = .Won
 		append(&game_board.messages, Message{"You won!", 0})
 	} else if game_board.active_row == len(game_board.rows) - 1 {
-		game_board.state = .Lost
+		game_board.mode = .Lost
 		append(&game_board.messages, Message{"You lost!", 0})
 	}
 
